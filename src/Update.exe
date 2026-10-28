@@ -1,0 +1,21 @@
+#!/bin/bash
+# Stand-in for Squirrel's Update.exe. The app calls it to toggle "Launch at login".
+AUTOSTART="$HOME/.config/autostart/wispr-flow.desktop"
+RUN="$(cd "$(dirname "$0")" && pwd)/run.sh"
+for arg in "$@"; do
+  case "$arg" in
+    --createShortcut=*)
+      mkdir -p "$(dirname "$AUTOSTART")"
+      cat > "$AUTOSTART" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=Wispr Flow
+Exec=$RUN
+Icon=wispr-flow
+X-GNOME-Autostart-enabled=true
+DESKTOP
+      ;;
+    --removeShortcut=*) rm -f "$AUTOSTART" ;;
+  esac
+done
+exit 0

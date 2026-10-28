@@ -1,0 +1,7 @@
+{
+  "name": "wispr-flow",
+  "productName": "Wispr Flow",
+  "version": "__VERSION__",
+  "description": "Wispr Flow (Linux shim)",
+  "main": "loader.js"
+}
