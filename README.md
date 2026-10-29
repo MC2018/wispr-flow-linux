@@ -50,7 +50,9 @@ update, `~/.cache/wispr-linux/loader.log` says `PATCH NOT APPLIED`.
    manager can't move, raise or close it, and it blocks the desktop.
 3. **Status overlay shape never empty.** An empty window shape makes Cinnamon's compositor stop repainting
    under the overlay, leaving a rectangle of stale pixels.
-4. **Status preload.** Points the status overlay at `status-preload.js` (see below).
+4. **Status hover poll 50 ms.** The overlay's hover poll runs every 400 ms. Windows also wakes it on mouse
+   moves; Linux has only the poll, so quick clicks were lost.
+5. **Status preload.** Points the status overlay at `status-preload.js` (see below).
 
 ### Clicking the status pill and its pop-ups
 
@@ -63,6 +65,11 @@ its poll sees the cursor over a button. Three Linux gaps broke that, and `loader
   leave and hover states stuck. `loader.js` forwards mouse moves to such windows itself.
 - The overlay page has its own `isWindows` flag. Only a Windows page reports its tooltips and shadows as part of
   the window shape; otherwise they are cut off. `status-preload.js` turns that flag on.
+
+The overlay also clips itself to the shape of its visible parts. Its hover animation changes that shape every
+frame, and on Cinnamon each change flashes white boxes and drops frames, so the pill opened in chunks.
+`loader.js` pads the shape by 64 px so the animation and tooltip fit inside it. It grows the shape at once
+and shrinks it only after 400 ms without changes.
 
 ### Helper protocol
 

@@ -84,6 +84,33 @@ function forwardPointer(p) {
   }
 }
 
+// The status overlay clips itself to the shape of its visible parts, and its hover animation changes that shape every
+// frame. On Cinnamon each shape change flashes white boxes and stalls the page's frames, so the pill popped open in
+// chunks. Pad the shape so the animation and tooltip fit inside it, grow it at once, shrink it only once things settle.
+const SHAPE_PAD = 64;
+const SHAPE_SETTLE_MS = 400;
+const shapes = new WeakMap();
+const setShape = BrowserWindow.prototype.setShape;
+const covers = (shape, rects) => rects.every((r) => shape.some((s) =>
+  r.x >= s.x && r.y >= s.y && r.x + r.width <= s.x + s.width && r.y + r.height <= s.y + s.height));
+BrowserWindow.prototype.setShape = function (rects) {
+  const s = shapes.get(this) || {};
+  shapes.set(this, s);
+  clearTimeout(s.timer);
+  const apply = (r) => { s.applied = r; setShape.call(this, r); };
+  // The app hides the overlay with a 1px shape (see "status shape never empty"): apply that as is.
+  if (rects.length === 1 && rects[0].width <= 1 && rects[0].height <= 1) return apply(rects);
+  const { width, height } = this.getBounds();
+  const padded = rects.map((r) => {
+    const x = Math.max(0, r.x - SHAPE_PAD), y = Math.max(0, r.y - SHAPE_PAD);
+    return { x, y, width: Math.min(width, r.x + r.width + SHAPE_PAD) - x, height: Math.min(height, r.y + r.height + SHAPE_PAD) - y };
+  }).filter((r) => r.width > 0 && r.height > 0);
+  if (!s.applied || !covers(s.applied, rects)) return apply(padded.length ? padded : rects);
+  s.timer = setTimeout(() => {
+    if (!this.isDestroyed() && covers(s.applied, padded) && !covers(padded, s.applied)) apply(padded);
+  }, SHAPE_SETTLE_MS);
+};
+
 app.whenReady().then(() => {
   const { screen } = require('electron');
   const orig = screen.getCursorScreenPoint.bind(screen);
@@ -152,6 +179,9 @@ const PATCHES = [
   // repainting under it and shows stale pixels. Keep a 1px on-window shape instead: still invisible.
   ['status shape never empty', 'n!==this.lastShapeKey&&(t.setShape(e),this.lastShapeKey=n)',
     'n!==this.lastShapeKey&&(t.setShape(e.some(r=>r.x+r.width>0&&r.y+r.height>0)?e:[{x:0,y:0,width:1,height:1}]),this.lastShapeKey=n)'],
+  // The status overlay takes clicks only once its hover poll sees the cursor over a button. Every 400 ms is fine on
+  // Windows, where mouse moves also trigger it; Linux has only the poll, so quick clicks got lost. Poll every 50 ms.
+  ['status hover poll 50ms', 'I=100,C=(e,t=0,n=400)=>', 'I=100,C=(e,t=0,n=50)=>'],
   // The status page has its own isWindows flag; without it, tooltips and pop-ups are cut off. See status-preload.js.
   ['status preload', 'preload:require("path").resolve(__dirname,"../renderer","status","preload.js")',
     `preload:${JSON.stringify(path.join(__dirname, 'status-preload.js'))}`],
