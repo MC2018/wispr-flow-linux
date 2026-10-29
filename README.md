@@ -34,6 +34,8 @@ Default shortcuts are the Windows ones: hold **Ctrl+Win** to dictate, **Ctrl+Win
 | `install.sh` | Downloads the latest Windows installer (checks its SHA-256), extracts it, fetches the matching Linux Electron and a Linux `sqlite3` build, assembles `wispr-flow/`, and registers the menu entry and `wispr-flow://` sign-in links. |
 | `src/loader.js` | Electron entry point. Patches the main bundle in memory, swaps in the Linux helper, and puts dictated text on the clipboard. |
 | `src/wispr-linux-helper.py` | The Linux helper. Hotkeys via XRecord, Ctrl+V (Ctrl+Shift+V in terminals) via XTEST, active window via EWMH. |
+| `src/pointer-watch.py` | Reports the live mouse position to `loader.js` (see "Clicking the status pill"). |
+| `src/status-preload.js` | Runs the status overlay's own preload with its Windows flag on. |
 | `src/Update.exe` | Stand-in for Squirrel's `Update.exe`; turns "Launch at login" into an XDG autostart entry. |
 | `tools/` | Debugging and test scripts (see below). |
 
@@ -48,6 +50,19 @@ update, `~/.cache/wispr-linux/loader.log` says `PATCH NOT APPLIED`.
    manager can't move, raise or close it, and it blocks the desktop.
 3. **Status overlay shape never empty.** An empty window shape makes Cinnamon's compositor stop repainting
    under the overlay, leaving a rectangle of stale pixels.
+4. **Status preload.** Points the status overlay at `status-preload.js` (see below).
+
+### Clicking the status pill and its pop-ups
+
+The status overlay (pill, tips, usage-limit pop-ups) is click-through. The app turns clicks on only while
+its poll sees the cursor over a button. Three Linux gaps broke that, and `loader.js` fixes each one:
+
+- `screen.getCursorScreenPoint()` stays frozen on X11 while the pointer is over other apps, so the poll never
+  saw the cursor arrive. `loader.js` serves the live position from `pointer-watch.py` instead.
+- Electron ignores `setIgnoreMouseEvents(true, {forward: true})` on Linux, so the page never heard the mouse
+  leave and hover states stuck. `loader.js` forwards mouse moves to such windows itself.
+- The overlay page has its own `isWindows` flag. Only a Windows page reports its tooltips and shadows as part of
+  the window shape; otherwise they are cut off. `status-preload.js` turns that flag on.
 
 ### Helper protocol
 
@@ -61,7 +76,7 @@ update, `~/.cache/wispr-linux/loader.log` says `PATCH NOT APPLIED`.
 ## Not supported yet
 
 - Reading the focused text box (context-aware formatting), "edit selected text" commands.
-- Meeting notes with system audio. Clicking the floating status pill.
+- Meeting notes with system audio.
 - Auto-update inside the app: rerun `./install.sh` instead.
 
 ## Logs

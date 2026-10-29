@@ -3,7 +3,7 @@
 const path = require('path');
 const fs = require('fs');
 const cp = require('child_process');
-const { app, clipboard } = require('electron');
+const { app, clipboard, BrowserWindow } = require('electron');
 
 const LOG = path.join(require('os').homedir(), '.cache', 'wispr-linux', 'loader.log');
 fs.mkdirSync(path.dirname(LOG), { recursive: true });
@@ -59,6 +59,57 @@ cp.spawn = function (cmd, args, opts) {
   return child;
 };
 
+// The status pill and its notifications ignore clicks until the app's poll sees the cursor over them. That poll
+// uses screen.getCursorScreenPoint(), which on X11 stays frozen while the pointer is over other apps' windows,
+// so the X / checkmark / dismiss buttons never became clickable. Serve the real pointer position instead.
+// Electron also drops setIgnoreMouseEvents' {forward: true} on Linux, so a click-through window never sees the
+// mouse move over or leave it and the pill's hover state (tooltip, expanded buttons) sticks. Forward moves here.
+const forwarding = new Set();
+const hovered = new Set();
+const setIgnore = BrowserWindow.prototype.setIgnoreMouseEvents;
+BrowserWindow.prototype.setIgnoreMouseEvents = function (ignore, opts) {
+  if (ignore && opts && opts.forward) forwarding.add(this); else forwarding.delete(this);
+  return setIgnore.apply(this, arguments);
+};
+function forwardPointer(p) {
+  for (const win of forwarding) {
+    if (win.isDestroyed()) { forwarding.delete(win); hovered.delete(win); continue; }
+    const b = win.getBounds();
+    if (win.isVisible() && p.x >= b.x && p.y >= b.y && p.x < b.x + b.width && p.y < b.y + b.height) {
+      hovered.add(win);
+      win.webContents.sendInputEvent({ type: 'mouseMove', x: p.x - b.x, y: p.y - b.y });
+    } else if (hovered.delete(win)) {
+      win.webContents.sendInputEvent({ type: 'mouseLeave', x: 0, y: 0 });
+    }
+  }
+}
+
+app.whenReady().then(() => {
+  const { screen } = require('electron');
+  const orig = screen.getCursorScreenPoint.bind(screen);
+  let pointer = null;
+  const watcher = origSpawn('python3', ['-u', path.join(__dirname, 'helper', 'pointer-watch.py')],
+    { stdio: ['ignore', 'pipe', 'ignore'] });
+  let buf = '';
+  watcher.stdout.on('data', (chunk) => {
+    const lines = (buf + chunk).split('\n');
+    buf = lines.pop();
+    const [x, y] = lines.pop()?.split(' ').map(Number) ?? [];
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    pointer = { x, y };
+    try { forwardPointer(screen.getCursorScreenPoint()); } catch (e) { log('pointer forward error', e.message); }
+  });
+  watcher.on('error', (e) => log('pointer watcher failed:', e.message));
+  watcher.on('exit', (code) => { pointer = null; log('pointer watcher exited', code); });
+  app.on('will-quit', () => watcher.kill());
+  // X reports physical pixels; Electron works in DIPs (one scale factor for all displays on X11).
+  screen.getCursorScreenPoint = () => {
+    if (!pointer) return orig();
+    const s = screen.getPrimaryDisplay().scaleFactor || 1;
+    return { x: Math.round(pointer.x / s), y: Math.round(pointer.y / s) };
+  };
+});
+
 // Windows-only Electron APIs that don't exist on Linux.
 for (const fn of ['setUserTasks', 'setJumpList', 'setAppUserModelId']) {
   if (typeof app[fn] !== 'function') app[fn] = () => { log(`stubbed app.${fn}()`); return true; };
@@ -101,6 +152,9 @@ const PATCHES = [
   // repainting under it and shows stale pixels. Keep a 1px on-window shape instead: still invisible.
   ['status shape never empty', 'n!==this.lastShapeKey&&(t.setShape(e),this.lastShapeKey=n)',
     'n!==this.lastShapeKey&&(t.setShape(e.some(r=>r.x+r.width>0&&r.y+r.height>0)?e:[{x:0,y:0,width:1,height:1}]),this.lastShapeKey=n)'],
+  // The status page has its own isWindows flag; without it, tooltips and pop-ups are cut off. See status-preload.js.
+  ['status preload', 'preload:require("path").resolve(__dirname,"../renderer","status","preload.js")',
+    `preload:${JSON.stringify(path.join(__dirname, 'status-preload.js'))}`],
 ];
 for (const [name, from, to] of PATCHES) {
   if (src.includes(from)) { src = src.split(from).join(to); log('patched:', name); }

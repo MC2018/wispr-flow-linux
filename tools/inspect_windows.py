@@ -19,4 +19,4 @@ def walk(w, depth=0):
         except Exception as e: print('err', e)
         if depth < 2: walk(k, depth+1)
 walk(root)
-p = root.query_pointer(); print('pointer', p.root_x, p.root_y, 'child', hex(p.child))
+p = root.query_pointer(); print('pointer', p.root_x, p.root_y, 'child', hex(p.child.id) if p.child else None)
