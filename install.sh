@@ -15,6 +15,8 @@ need 7z "sudo apt install p7zip-full"
 need npm "Node.js"
 need curl "sudo apt install curl"
 python3 -c 'import Xlib' 2>/dev/null || { echo "Missing python3-xlib (sudo apt install python3-xlib)"; exit 1; }
+python3 -c 'import gi; gi.require_version("Atspi", "2.0")' 2>/dev/null \
+  || echo "Note: python3-gi / gir1.2-atspi-2.0 missing: dictionary suggestions will use keystrokes only (less exact in GTK/Firefox apps)."
 
 echo "==> Checking latest Windows release"
 manifest="$(curl -fsSL https://dl.wisprflow.com/wispr-flow/win32/latest.json)"

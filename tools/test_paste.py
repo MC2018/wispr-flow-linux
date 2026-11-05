@@ -14,8 +14,9 @@ view = Gtk.TextView(); win.add(view); win.show_all(); win.present(); view.grab_f
 Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).set_text(TEXT, -1)
 
 parent, child = socket.socketpair()
-proc = subprocess.Popen([sys.executable, "-u", HELPER], stdin=subprocess.PIPE, pass_fds=(child.fileno(),),
-                        preexec_fn=lambda: os.dup2(child.fileno(), 3))
+# Popen closes fds outside pass_fds after preexec_fn runs, so map the socket to fd 3 in a shell instead.
+proc = subprocess.Popen(["bash", "-c", f'exec 3>&{child.fileno()}; exec "$0" -u "$1"', sys.executable, HELPER],
+                        stdin=subprocess.PIPE, pass_fds=(child.fileno(),))
 child.close(); parent.setblocking(False)
 d = display.Display(); act = d.intern_atom("_NET_ACTIVE_WINDOW")
 state = {"sent": False, "buf": "", "t0": time.time()}
