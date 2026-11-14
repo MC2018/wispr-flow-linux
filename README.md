@@ -14,6 +14,8 @@ that speaks the same protocol.
 
 - Linux on **X11** (tested on Linux Mint 22 / Cinnamon). Wayland is not supported.
 - `node`/`npm`, `7z` (`p7zip-full`), `curl`, `python3`, `python3-xlib`, `python3-pil`
+- Optional, for dictionary suggestions in GTK/Qt/Firefox apps: `python3-gi` and `gir1.2-atspi-2.0`
+  (installed by default on Mint)
 
 ## Install / update
 
@@ -33,7 +35,7 @@ Default shortcuts are the Windows ones: hold **Ctrl+Win** to dictate, **Ctrl+Win
 | --- | --- |
 | `install.sh` | Downloads the latest Windows installer (checks its SHA-256), extracts it, fetches the matching Linux Electron and a Linux `sqlite3` build, assembles `wispr-flow/`, and registers the menu entry and `wispr-flow://` sign-in links. |
 | `src/loader.js` | Electron entry point. Patches the main bundle in memory, swaps in the Linux helper, and puts dictated text on the clipboard. |
-| `src/wispr-linux-helper.py` | The Linux helper. Hotkeys via XRecord, Ctrl+V (Ctrl+Shift+V in terminals) via XTEST, active window via EWMH. |
+| `src/wispr-linux-helper.py` | The Linux helper. Hotkeys via XRecord, Ctrl+V (Ctrl+Shift+V in terminals) via XTEST, active window via EWMH, edit detection via AT-SPI or keystrokes. |
 | `src/pointer-watch.py` | Reports the live mouse position to `loader.js` (see "Clicking the status pill"). |
 | `src/status-preload.js` | Runs the status overlay's own preload with its Windows flag on. |
 | `src/Update.exe` | Stand-in for Squirrel's `Update.exe`; turns "Launch at login" into an XDG autostart entry. |
@@ -80,9 +82,41 @@ and shrinks it only after 400 ms without changes.
 - Keys are reported as **Windows virtual-key codes** (`KeypressEvent`), which the app matches against shortcuts.
 - `node tools/dump-schema.js <bundle>/index.js schema.json` prints every message type.
 
+### Dictionary suggestions (edit detection)
+
+When you fix a word Wispr got wrong, the app offers to add it to your dictionary. On Windows the helper
+watches the text box after each paste and reports your edits (`UpdateEditedText`). The Linux helper does
+the same in one of two ways.
+
+**Reading the text box (AT-SPI, the Linux accessibility API).** Firefox, Zen and other Gecko browsers,
+GTK and Qt apps.
+
+1. Before pasting, it reads the focused text box. After pasting, it finds where the dictated text landed.
+2. It re-reads the box every 0.5 s, and 0.15 s after each key.
+3. It stops when the box loses focus, its window changes, it gets emptied (a chat message was sent),
+   another paste starts, or after 10 minutes. Then it sends the dictated text and your edited version.
+
+**Rebuilding the text from your input.** Electron and Chromium apps (Slack, Discord, VS Code, Chrome)
+expose no text boxes over AT-SPI unless started with `--force-renderer-accessibility`, so the helper starts
+from the dictated text and replays what you do to it:
+
+- Typing, Backspace/Delete, arrows, Ctrl+arrows/Backspace/Delete (word steps), Shift selections,
+  Ctrl+X and Ctrl+V are modelled.
+- **Double-click or drag over a word:** the helper reads the selected text from the X PRIMARY selection
+  and finds it in the dictated text, so it knows exactly what you replaced.
+- **Single click:** the caret position is unknown, so every position is tried. When you finish, the
+  result must look like a word fix (close in spelling to a word you had) and clearly beat the other
+  positions, or nothing is reported.
+- It stops on Enter (sent), Tab, another window, keys it can't follow (Home/End, Up/Down, Ctrl+A,
+  Ctrl+Z, shortcuts), another paste, or after 10 minutes. Shift+Enter adds a new line.
+
+The app does the rest: it diffs the two texts, asks Wispr's server which changed words are worth learning,
+and shows the notification. The app's auto-learn words setting (on by default) must stay on.
+Terminals are skipped.
+
 ## Not supported yet
 
-- Reading the focused text box (context-aware formatting), "edit selected text" commands.
+- Sending the focused text box to the app for context-aware formatting (`GetTextBoxInfo`), "edit selected text" commands.
 - Meeting notes with system audio.
 - Auto-update inside the app: rerun `./install.sh` instead.
 
@@ -95,6 +129,7 @@ and shrinks it only after 400 ms without changes.
 ## Tools
 
 - `tools/test_paste.py`: pastes into a throwaway window through the helper and checks the result.
+- `tools/test_edits.py`: edit detection end to end (GTK, Firefox, Chrome, optionally Electron) on a nested Xephyr display, so it never types into your windows.
 - `tools/test_overlay.py`: checks the status overlay is truly see-through.
 - `tools/inspect_windows.py`: lists Wispr windows with override-redirect and input-shape info.
 - `tools/shot.py`, `tools/ctx.py`: screenshots; context search in minified bundles.
