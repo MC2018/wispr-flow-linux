@@ -1,8 +1,9 @@
 # End-to-end test of edit detection (UpdateEditedText), run on a nested Xephyr display with a private
 # D-Bus/AT-SPI session, so no keys reach your real windows.
 # The helper pastes, the "user" fixes a word, then the box loses focus or gets cleared (chat-style send).
+# gtk-rebuild: the box briefly reads one letter (as Zen's editors do) before focus moves; the fix must still be reported.
 # GTK and Firefox are read over AT-SPI; Chrome and Electron can't be, so their cases test the keystroke model
-# (typing, a double-clicked word, a single click followed by Backspace).
+# (typing, a double-clicked word retyped close to or unlike the original, a single click followed by Backspace).
 # Usage: python3 tools/test_edits.py [case...]
 #   needs Xephyr; Firefox and google-chrome/chromium for those cases; set WISPR_TEST_ELECTRON=/path/to/electron
 #   to add Electron cases.
@@ -19,8 +20,8 @@ if os.environ.get("WISPR_TEST_NESTED") != "1":  # outer run: start Xephyr + a pr
     env = {k: v for k, v in os.environ.items() if k != "AT_SPI_BUS_ADDRESS"}
     env.update(DISPLAY=disp, WISPR_TEST_NESTED="1", WISPR_HELPER_LOG=os.path.join(tempfile.gettempdir(), "wispr-test-helper.log"))
     chrome = shutil.which("google-chrome") or shutil.which("chromium") or shutil.which("chromium-browser")
-    cases = sys.argv[1:] or (["gtk-focus", "gtk-clear"] + (["firefox"] if shutil.which("firefox") else [])
-                             + (["chrome-keys", "chrome-dblclick", "chrome-click"] if chrome else [])
+    cases = sys.argv[1:] or (["gtk-focus", "gtk-clear", "gtk-rebuild"] + (["firefox"] if shutil.which("firefox") else [])
+                             + (["chrome-keys", "chrome-dblclick", "chrome-dblclick-new", "chrome-click"] if chrome else [])
                              + (["electron-dblclick"] if os.environ.get("WISPR_TEST_ELECTRON") else []))
     if chrome:
         env["WISPR_TEST_CHROME"] = chrome
@@ -43,8 +44,9 @@ CASE = sys.argv[1]
 GTK = CASE.startswith("gtk")
 BLINK = CASE.startswith(("chrome", "electron"))  # no AT-SPI text: the keystroke model is tested
 TEXT = "I pushed the shuffle fix" if CASE == "firefox" else "I pushed the shuffle fix today."
+NEW_WORD = "Spotify" if CASE == "chrome-dblclick-new" else "Shuffull"  # a retyped word needn't look alike
 WANT = {"firefox": "I pushed the shuffull fix", "chrome-keys": "I pushed the shuffull fix today."}.get(
-    CASE, "I pushed the Shuffull fix today.")
+    CASE, f"I pushed the {NEW_WORD} fix today.")
 CHAR_W, LINE_Y = 12.0, 12  # Blink page: 20px monospace textarea at the window's top-left corner
 esc = lambda s: s.replace("+", "+1").replace("|", "+2") + "|"  # noqa: E731
 
@@ -147,9 +149,9 @@ def user_edit():
         for _ in range(len(TEXT) - word - 5):
             tap("BackSpace")
         type_text("ull fix today.")
-    elif CASE.endswith("dblclick"):  # double-click the word, type over it
+    elif "dblclick" in CASE:  # double-click the word, type over it
         click(word + 3.5, times=2)
-        type_text("Shuffull")
+        type_text(NEW_WORD)
     elif CASE == "chrome-click":  # click at the end of the word, backspace it, retype
         click(word + 7)
         for _ in range(7):
@@ -160,6 +162,8 @@ def user_edit():
         i = txt.index("shuffle")
         buf.delete(buf.get_iter_at_offset(i), buf.get_iter_at_offset(i + 7))
         buf.insert(buf.get_iter_at_offset(i), "Shuffull")
+        if CASE == "gtk-rebuild":  # then the editor rebuilds its nodes and the box reads one letter of the paste until focus moves
+            GLib.timeout_add(600, lambda: buf.set_text("x", -1) or False)
     else:  # retype it with real keystrokes
         for k in ["BackSpace"] * 6 + list("ull") + ["space"] + list("fix"):
             tap(k)
@@ -168,7 +172,7 @@ def user_edit():
 def end_observation():
     if CASE in ("chrome-keys", "chrome-click"):
         tap("Return")  # chat-style send
-    elif CASE.endswith("dblclick"):
+    elif "dblclick" in CASE:
         tap("Tab")
     elif CASE == "gtk-clear":
         buf.set_text("", -1)  # a chat app sent the message and emptied the box

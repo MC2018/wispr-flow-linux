@@ -320,7 +320,7 @@ class KeyListener(threading.Thread):
 try:
     import gi
     gi.require_version("Atspi", "2.0")
-    from gi.repository import Atspi
+    from gi.repository import Atspi, GLib
     ATSPI_ERROR = None
 except (ImportError, ValueError) as _e:
     Atspi, ATSPI_ERROR = None, repr(_e)
@@ -389,6 +389,11 @@ def map_region(old, start, end, new):
 
     s, e = map_pos(start, True), map_pos(end, False)
     return (s, e) if e > s else (s, s)
+
+
+def region_kept(old, start, end, new):
+    """How many characters of old[start:end] are still there, unchanged, in new."""
+    return sum(max(0, min(i2, end) - max(i1, start)) for tag, i1, i2, _, _ in diff_ops(old, new) if tag == "equal")
 
 
 def edit_distance(a, b):
@@ -508,17 +513,24 @@ class TypedText:
         return True
 
     def select_found(self, sel):
-        """The mouse selected `sel`: keep candidates where it occurs. False if it isn't in the pasted text."""
-        new = set()
-        for t in {c[0] for c in self.cands}:
-            i = t.find(sel)
-            while i >= 0:
-                new.add((t, i + len(sel), i, 0.0))
-                i = t.find(sel, i + 1)
-        if not new or len(new) > self.MAX_CANDIDATES:
-            return False
-        self.cands, self.clicked = new, True
-        return True
+        """The mouse selected `sel`: keep the candidates where it occurs and return how many there are.
+        One match means the caret is known exactly again. 0 (not in the pasted text) changes nothing."""
+        variants = [sel]
+        for v in (sel.replace("\xa0", " "), sel.replace("\xa0", " ").strip()):  # browsers may hand out NBSPs
+            if v and v not in variants:
+                variants.append(v)
+        for v in variants:
+            new = set()
+            for t in {c[0] for c in self.cands}:
+                i = t.find(v)
+                while i >= 0:
+                    new.add((t, i + len(v), i, 0.0))
+                    i = t.find(v, i + 1)
+            if new and len(new) <= self.MAX_CANDIDATES:
+                # a selection found in exactly one place pins the caret down: no fuzzy check needed later
+                self.cands, self.clicked = new, len(new) > 1
+                return len(new)
+        return 0
 
     def match_selection(self, sel):
         """A keyboard selection changed PRIMARY: drop candidates whose selection doesn't match it."""
@@ -623,6 +635,7 @@ class EditObserver(threading.Thread):
     AFTER_KEY = 0.15       # snapshot this long after a key, so the last state before Enter/focus loss is fresh
     LANDING_TIMEOUT = 2.0  # give up if the paste never shows up in the text box
     MAX_SECONDS = 600      # stop watching a text box after 10 minutes
+    MIN_KEPT_CHECK = 10    # a paste this long with under 10% of it left is a cleared box, not a rewrite
     KEYS_GRACE = 0.25      # ignore input this long after our own Ctrl+V
     CLICK_SELECT = 1.2     # a PRIMARY change this soon after a click is a mouse selection
     MAX_TYPED_TEXT = 5000  # don't keystroke-track longer pastes
@@ -678,13 +691,20 @@ class EditObserver(threading.Thread):
         self.sel_win = self.xd.screen().root.create_window(0, 0, 1, 1, 0, X.CopyFromParent)
         threading.Thread(target=self.watch_primary, daemon=True).start()
         log("edit observer started", "(AT-SPI + keystrokes)" if Atspi else "(keystrokes only, no AT-SPI)")
+        ctx = GLib.MainContext.default() if Atspi else None
         while True:
             timeout = max(0.0, self.obs["next_poll"] - time.time()) if self.obs else None
+            if ctx:  # wake up now and then to let libatspi process its D-Bus messages
+                timeout = min(timeout, 2.0) if timeout is not None else 2.0
             try:
                 cmd = self.q.get(timeout=timeout)
             except queue.Empty:
                 cmd = None
             try:
+                if ctx:  # cache updates (focus, windows, apps): unprocessed they go stale and pile up
+                    for _ in range(5000):
+                        if not ctx.iteration(False):
+                            break
                 if cmd:
                     getattr(self, "cmd_" + cmd[0])(*cmd[1:])
                 if self.obs and time.time() >= self.obs["next_poll"]:
@@ -797,6 +817,7 @@ class EditObserver(threading.Thread):
                 return
             base = {"pasteId": paste_id, "text": text, "wid": info["wid"], "app": info.get("bundleId")}
             acc = self.find_focused(info.get("pid")) if Atspi else None
+            base["why"] = "no AT-SPI" if not Atspi else "no focused element" if acc is None else acc.get_role_name()
             if acc is not None:
                 role = acc.get_role()
                 if acc.get_state_set().contains(Atspi.StateType.EDITABLE) and acc.get_text_iface() is not None \
@@ -829,7 +850,7 @@ class EditObserver(threading.Thread):
                     "caps": bool(mask & X.LockMask), "numlock": bool(mask & X.Mod2Mask),
                     "last_button": 0.0, "primary_due": None}
         self.keys = True
-        log("edit observer: no readable text box, following keystrokes in", p["app"])
+        log(f"edit observer: no readable text box ({p['why']}), following keystrokes in", p["app"])
 
     def cmd_key(self, vk, pressed):
         if not self.obs:
@@ -937,11 +958,15 @@ class EditObserver(threading.Thread):
     def read_primary(self):
         o = self.obs
         sel = self.read_selection("PRIMARY")
+        since = time.time() - o["last_button"]
         if not sel:
+            log(f"edit observer: selection changed {since:.2f}s after a click but couldn't be read")
             return
-        if time.time() - o["last_button"] < self.CLICK_SELECT:
-            if not o["model"].select_found(sel):
-                self.lost("mouse selection outside the pasted text")
+        if since < self.CLICK_SELECT:
+            n = o["model"].select_found(sel)
+            # lengths only, never the text
+            log(f"edit observer: mouse selection of {len(sel)} chars {since:.2f}s after a click,",
+                f"found {n}x in the pasted text" if n else "not in the pasted text, ignored")
         elif len(o["model"].cands) > 1:
             o["model"].match_selection(sel)
 
@@ -985,6 +1010,12 @@ class EditObserver(threading.Thread):
 
         if text != o["last"]:
             s, e = map_region(o["base"], o["start"], o["end"], text)
+            n = o["end"] - o["start"]
+            if e > s and n >= self.MIN_KEPT_CHECK and region_kept(o["base"], o["start"], o["end"], text) < max(3, n // 10):
+                # Almost none of a longer paste is left: the box was cleared or its editor rebuilt its nodes
+                # (Zen briefly reads back one character). That isn't an edit; keep the last real state.
+                log("edit observer: box now reads", len(text), "chars with almost none of the paste left, treating it as cleared")
+                e = s
             if e == s:
                 ls, le = map_region(o["base"], o["start"], o["end"], o["last"])
                 # Emptied in one go (message sent, box cleared): report the last state we saw.
