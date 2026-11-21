@@ -142,11 +142,16 @@ for (const fn of ['setUserTasks', 'setJumpList', 'setAppUserModelId']) {
   if (typeof app[fn] !== 'function') app[fn] = () => { log(`stubbed app.${fn}()`); return true; };
 }
 
-// Windows reads the window icon from the .exe; on Linux each window has to be given one.
+// Windows reads the window icon from the .exe; on Linux each window has to be given one. On X11 Electron
+// silently leaves the icon empty when it is larger than 64 px, and icon.png is 256 px.
 const ICON = path.join(__dirname, 'icon.png');
 if (fs.existsSync(ICON)) {
+  let icon;
   app.on('browser-window-created', (_e, win) => {
-    try { win.setIcon(ICON); } catch (e) { log('setIcon failed', e.message); }
+    try {
+      icon = icon || require('electron').nativeImage.createFromPath(ICON).resize({ width: 64, height: 64 });
+      win.setIcon(icon);
+    } catch (e) { log('setIcon failed', e.message); }
   });
 }
 

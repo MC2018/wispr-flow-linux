@@ -106,6 +106,9 @@ d = tempfile.mkdtemp(); subprocess.run(["7z", "x", "-y", "-o" + d, sys.argv[3], 
 im = Image.open(os.path.join(d, "setupIcon.ico")); im.size = max(im.info["sizes"]); im.load(); im.save(sys.argv[2])
 PY
 cp "$icon_dir/wispr-flow.png" "$APP/resources/app/icon.png" 2>/dev/null || true
+# An icon cache left by another app hides icons added after it was built, so the panel shows a generic icon.
+[[ -f "$HOME/.local/share/icons/hicolor/icon-theme.cache" ]] &&
+  gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" >/dev/null 2>&1 || true
 cat > "$HOME/.local/share/applications/wispr-flow.desktop" <<EOF
 [Desktop Entry]
 Name=Wispr Flow
