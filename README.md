@@ -37,14 +37,15 @@ Default shortcuts are the Windows ones: hold **Ctrl+Win** to dictate, **Ctrl+Win
 | `src/loader.js` | Electron entry point. Patches the main bundle in memory, swaps in the Linux helper, and puts dictated text on the clipboard. |
 | `src/wispr-linux-helper.py` | The Linux helper. Hotkeys via XRecord, Ctrl+V (Ctrl+Shift+V in terminals) via XTEST, active window via EWMH, edit detection via AT-SPI or keystrokes. |
 | `src/pointer-watch.py` | Reports the live mouse position to `loader.js` (see "Clicking the status pill"). |
-| `src/status-preload.js` | Runs the status overlay's own preload with its Windows flag on. |
+| `src/windows-preload.js` | Runs one of Wispr's page preloads with that page's Windows flag on. |
+| `src/status-preload.js`, `src/hub-preload.js` | Preloads for the status overlay and the hub, using `windows-preload.js`. |
 | `src/Update.exe` | Stand-in for Squirrel's `Update.exe`; turns "Launch at login" into an XDG autostart entry. |
 | `tools/` | Debugging and test scripts (see below). |
 
 ### Bundle patches (`src/loader.js`)
 
-Each patch is a literal string replacement in the minified main bundle. If one stops matching after a Wispr
-update, `~/.cache/wispr-linux/loader.log` says `PATCH NOT APPLIED`.
+Each patch is a literal string or regex replacement in the minified main bundle. Regexes cover spots where
+the minifier's variable names change between releases. If one stops matching after a Wispr update, `~/.cache/wispr-linux/loader.log` says `PATCH NOT APPLIED`.
 
 1. **Treat Linux as Windows.** The Windows code paths (shortcuts, deep links, helper IPC) fit Linux;
    the macOS ones (fn key, Accessibility, `/Applications` check) do not.
@@ -55,6 +56,8 @@ update, `~/.cache/wispr-linux/loader.log` says `PATCH NOT APPLIED`.
 4. **Status hover poll 50 ms.** The overlay's hover poll runs every 400 ms. Windows also wakes it on mouse
    moves; Linux has only the poll, so quick clicks were lost.
 5. **Status preload.** Points the status overlay at `status-preload.js` (see below).
+6. **Hub preload.** Points the hub at `hub-preload.js`. The hub has no window frame and draws its own title
+   bar. Its page adds the minimize, maximize and close buttons only when its own `isWindows` flag is on.
 
 ### Clicking the status pill and its pop-ups
 

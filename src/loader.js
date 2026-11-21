@@ -174,21 +174,29 @@ const PATCHES = [
   ['isWindows flag', 'u="win32"===process.platform,d=l&&', 'u=!0,d=l&&'],
   // On X11 a non-focusable window becomes override-redirect: the window manager can't move, raise or
   // dismiss it, so the hub would sit on top of everything. Make the hub a normal window.
-  ['hub window focusable', 'focusable:!1};w.tD?Object.assign(t,{frame:!1', 'focusable:!0};w.tD?Object.assign(t,{frame:!1'],
+  ['hub window focusable', /(title:"Flow Hub",[^;]*?)focusable:!1\}/, '$1focusable:!0}'],
   // The status overlay hides itself by setting an empty (or off-window) shape. Cinnamon's compositor then stops
   // repainting under it and shows stale pixels. Keep a 1px on-window shape instead: still invisible.
   ['status shape never empty', 'n!==this.lastShapeKey&&(t.setShape(e),this.lastShapeKey=n)',
     'n!==this.lastShapeKey&&(t.setShape(e.some(r=>r.x+r.width>0&&r.y+r.height>0)?e:[{x:0,y:0,width:1,height:1}]),this.lastShapeKey=n)'],
   // The status overlay takes clicks only once its hover poll sees the cursor over a button. Every 400 ms is fine on
   // Windows, where mouse moves also trigger it; Linux has only the poll, so quick clicks got lost. Poll every 50 ms.
-  ['status hover poll 50ms', 'I=100,C=(e,t=0,n=400)=>', 'I=100,C=(e,t=0,n=50)=>'],
+  ['status hover poll 50ms', /(\w=100,\w=\(e,t=0,n=)400(\)=>\{if\(!e\|\|e\.isDestroyed\(\)\))/, '$150$2'],
   // The status page has its own isWindows flag; without it, tooltips and pop-ups are cut off. See status-preload.js.
   ['status preload', 'preload:require("path").resolve(__dirname,"../renderer","status","preload.js")',
     `preload:${JSON.stringify(path.join(__dirname, 'status-preload.js'))}`],
+  // The hub has no window frame and draws its own title bar, with minimize/maximize/close only on Windows.
+  // See hub-preload.js.
+  ['hub preload', 'preload:require("path").resolve(__dirname,"../renderer","hub","preload.js")',
+    `preload:${JSON.stringify(path.join(__dirname, 'hub-preload.js'))}`],
 ];
+// Each patch is a literal string (every copy replaced) or a regex (first match replaced) for spots where the
+// minifier's variable names change between releases.
 for (const [name, from, to] of PATCHES) {
-  if (src.includes(from)) { src = src.split(from).join(to); log('patched:', name); }
-  else log('PATCH NOT APPLIED (bundle changed?):', name);
+  const found = typeof from === 'string' ? src.includes(from) : from.test(src);
+  if (!found) { log('PATCH NOT APPLIED (bundle changed?):', name); continue; }
+  src = typeof from === 'string' ? src.split(from).join(to) : src.replace(from, to);
+  log('patched:', name);
 }
 const m = new Module(bundle, module);
 m.filename = bundle;
