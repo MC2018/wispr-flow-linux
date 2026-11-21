@@ -72,7 +72,7 @@ for extra in assets migrations ax-inspect.mjs ax-inspect-lib.mjs ax-inspect-serv
 done
 cp "$rt/sqlite3-$sqlite_version.node" "$new/resources/wispr.asar.unpacked/.webpack/main/native_modules/build/Release/node_sqlite3.node"
 mkdir -p "$new/resources/app/helper"
-cp "$SRC/loader.js" "$SRC/status-preload.js" "$new/resources/app/"
+cp "$SRC/loader.js" "$SRC/windows-preload.js" "$SRC/status-preload.js" "$SRC/hub-preload.js" "$new/resources/app/"
 sed "s/__VERSION__/$version/" "$SRC/package.json" > "$new/resources/app/package.json"
 cp "$SRC/wispr-linux-helper.py" "$SRC/pointer-watch.py" "$new/resources/app/helper/"
 echo "$version" > "$new/resources/app/.wispr-version"
@@ -106,6 +106,9 @@ d = tempfile.mkdtemp(); subprocess.run(["7z", "x", "-y", "-o" + d, sys.argv[3], 
 im = Image.open(os.path.join(d, "setupIcon.ico")); im.size = max(im.info["sizes"]); im.load(); im.save(sys.argv[2])
 PY
 cp "$icon_dir/wispr-flow.png" "$APP/resources/app/icon.png" 2>/dev/null || true
+# An icon cache left by another app hides icons added after it was built, so the panel shows a generic icon.
+[[ -f "$HOME/.local/share/icons/hicolor/icon-theme.cache" ]] &&
+  gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" >/dev/null 2>&1 || true
 cat > "$HOME/.local/share/applications/wispr-flow.desktop" <<EOF
 [Desktop Entry]
 Name=Wispr Flow
