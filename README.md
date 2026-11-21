@@ -81,6 +81,9 @@ and shrinks it only after 400 ms without changes.
   `{"HelperAPIResponse": {"uuid": "<request uuid>", "ACK": true, "<Type>": {...}}}`.
 - Keys are reported as **Windows virtual-key codes** (`KeypressEvent`), which the app matches against shortcuts.
 - `node tools/dump-schema.js <bundle>/index.js schema.json` prints every message type.
+- On `DictationStart` the helper sends an `AppInfoUpdate` for the focused window. The app clears its app info
+  when a dictation starts and only takes it from an update sent during the dictation. Without it, the style for
+  the app (Personal messages, Work, Email, Other) is never applied.
 
 ### Dictionary suggestions (edit detection)
 

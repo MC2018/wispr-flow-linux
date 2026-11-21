@@ -1100,6 +1100,12 @@ def handle(req):
         respond(rid, HelperLaunchTiming={"helperMainEntryMs": START_MS}, TapState={"payload": {"tapEnabled": True}})
     elif kind == "PasteText":
         threading.Thread(target=handle_paste, args=(rid, payload), daemon=True).start()
+    elif kind == "DictationStart":
+        respond(rid)
+        # The app clears its app info when a dictation starts and only takes it from an AppInfoUpdate sent
+        # during the dictation. That update picks the style (personal, work, email, other) and tells the
+        # server which app it is formatting for. The window watcher only sends one when the window changes.
+        request("AppInfoUpdate", app_payload())
     elif kind == "GetAccessibilityStatus":
         respond(rid, AccessibilityStatus={"payload": {"status": True}})
     elif kind == "GetActiveAppInfo":
